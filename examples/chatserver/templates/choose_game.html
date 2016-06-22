@@ -1,0 +1,23 @@
+{% extends "chat_base.html" %}
+
+{% block "title" %}Choose game{% endblock %}
+
+{% block main_content %}
+  <p>Create game:
+		<form action="{% url 'choose_game' %}" method="post">
+			{% csrf_token %}
+			<input placeholder="Name of the game" name="game_name" type="text">
+			<input type="submit" value="Create">
+		</form>
+	</p>
+  <p>Current games:</p>
+  <ul>
+  {% for game_id, game_name in gameid2gamename.items %}
+  	<li>
+  		<a href="{% url 'play_game' %}?game_id={{ game_id }}">
+  			{{ game_name }}
+  		</a>
+  	</li>
+  {% endfor %}
+  </ul>
+{% endblock main_content %}

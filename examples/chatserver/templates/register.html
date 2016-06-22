@@ -1,0 +1,15 @@
+{% extends "chat_base.html" %}
+
+{% block "title" %}using subscribe-user{% endblock %}
+
+{% block introduction %}
+<p>Sign up</p>
+{% endblock introduction %}
+
+{% block main_content %}
+  <form action="" method="post">
+      {{ form.as_p }}
+      {% csrf_token %}
+      <input type="submit" value="Create the account">
+  </form>
+{% endblock main_content %}

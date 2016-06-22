@@ -1,0 +1,360 @@
+{% extends "chat_base.html" %}
+
+{% block "title" %}Deck Editor{% endblock %}
+
+{% block introduction %}
+{% endblock introduction %}
+
+{% block control_panel %}
+<span></span>
+{% endblock control_panel %}
+
+{% block script_panel %}
+<script type="text/javascript">
+
+var $;
+var receiveMessageCallback;
+		function sendMessageCardMovedToFieldA(card) {
+			if (card.field.type != 'b')
+				console.log('Type is not b: ', card);
+			else { // TODO
+				var num = card.field.num;
+				$.post('{% url "deck_editor" %}', {
+					message: num
+				});
+			}
+		}
+
+		function sendMessageCards(cards) {
+			console.log('cards: ' + cards);
+			$.post('{% url "deck_editor" %}', {
+				cards: cards + ''
+			});
+		}
+
+	jQuery(document).ready(function(dollar) {
+		$ = dollar;
+		var ws4redis = WS4Redis({
+			uri: '{{ WEBSOCKET_URI }}foobar?subscribe-user',
+			receive_message: receiveMessage,
+			heartbeat_msg: {{ WS4REDIS_HEARTBEAT }}
+		});
+		var billboard = $('#billboard');
+
+		$("#text_message").keydown(function(event) {
+			if (event.keyCode === 13) {
+				event.preventDefault();
+				sendMessage();
+			}
+		});
+
+		$('#send_message').click(sendMessage);
+
+		// send message to the server using Ajax
+		function sendMessageText(text) {
+			$.post('{% url "deck_editor" %}', {
+				message: text
+			});
+		}
+
+		function sendMessage() {
+			sendMessageText($('#text_message').val());
+		}
+
+		// receive a message though the Websocket from the server
+		function receiveMessage(msg) {
+			billboard.append('<br/>' + msg);
+			var a = JSON.parse(msg);
+			if (a['comment']) {
+				billboard.append('<br/>' + a['comment']);
+			}
+			billboard.scrollTop(billboard.scrollTop() + 25);
+			receiveMessageCallback(msg);
+		}
+
+		//a = JSON.parse('{"comment": "abc", "value": 123}');
+		//a['extra'] = 456;
+		//alert(a['value']);
+
+		start_editor();
+	});
+</script>
+
+	<script type="text/javascript" src="https://code.createjs.com/createjs-2015.11.26.min.js"></script>
+	<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/3.0.9/pixi.js"></script>
+	
+
+<script id="editable">
+	var canvas, stage;
+
+	var mouseTarget;	// the display object currently under the mouse, or being dragged
+	var dragStarted;	// indicates whether we are currently in a drag operation
+	var offset;
+	var redraw_on_next_tick = true;
+	var fields, cards;
+	var initialized = false;
+
+	function preinit() {
+		console.log('preinit');
+		var cardimage = [];
+		for (var i = 0; i < 30; i++){
+			var k = i % 10 + 1;
+			cardimage[i] = new Image();
+			cardimage[i].src = "/static/cards/card" + k + ".png";
+		}
+
+		cards = [];
+		for (var i = 0; i < 30; i++)
+			cards[i] = new createjs.Bitmap(cardimage[i]);
+	}
+
+	function start_editor() {
+		// create stage and point it to the canvas:
+		canvas = document.getElementById("testCanvas");
+		stage = new createjs.Stage(canvas);
+
+		// enable touch interactions if supported on the current device:
+		createjs.Touch.enable(stage);
+
+		// enabled mouse over / out events
+		stage.enableMouseOver(10);
+		stage.mouseMoveOutside = true; // keep tracking the mouse even when it leaves the canvas
+
+		// load the source image:
+		preinit();
+		createjs.Ticker.addEventListener("tick", tick);
+	}
+	
+	function is_in_field(field, card) {
+		return (field.x < card.x && card.x < field.x + field.getBounds().width)
+		    && (field.y < card.y && card.y < field.y + field.getBounds().height);
+	}
+	
+			
+	function update_field_label(field) { // TODO: remove
+		if (field != 0) {
+			//console.log(field);
+			//field.label.text = "N=" + field.counter;	
+		}
+	}
+	
+	function update_fields(card) {
+		for (var j = 0; j < fields.length; j++) {		
+			if (is_in_field(fields[j], card) && card.field != fields[j]) {
+				console.log('card is moved to field ' + j +
+							' of type ' + fields[j].type +
+							' from a field of type ' + card.field.type);
+				card.field.counter--;
+				fields[j].counter++;
+				if (fields[j].type == 'a') {
+					sendMessageCardMovedToFieldA(card);
+				}
+				
+				update_field_label(card.field);
+				update_field_label(fields[j]);
+				
+				card.field = fields[j];
+			}
+		}
+	}
+
+	receiveMessageCallback = function(msg) {
+	}
+	
+	function return_card_to_its_field_b(card) {
+		for (var j = 0; j < fields.length; j++) {		
+			if (fields[j].type == 'b') {
+				if (card.field == fields[j] && ! is_in_field(fields[j], card)) {
+					move_card_to_its_field(card);
+				}
+			}
+		}
+	}
+	
+	
+	function move_card_to_its_field(card) {
+		var field = card.field;
+		var n_cards_on_field = 0;
+		for (var i = 0; i < cards.length; i++)
+			if (cards[i].field == field)
+				n_cards_on_field++;
+		
+		console.log('n_cards_on_field = ' + n_cards_on_field);
+		card.x = field.x_center + n_cards_on_field * 3;
+		card.y = field.y_center + n_cards_on_field * 3;
+
+		//createjs.Tween.removeTweens(card);
+		//createjs.Tween.get(card) // get a new tween targeting circle
+		//	.to({x: field.x_center, y: field.y_center}, 1000)
+	}
+
+	var n_fields = 20, i_field_a_first = 10, i_field_a_last = 19;
+
+	function collectFieldA() {
+		var card_ids = [];
+		for (var i = 0; i < cards.length; i++) {
+			var num = cards[i].field.num;
+			if (i_field_a_first <= num && num <= i_field_a_last) {
+				card_ids[card_ids.length] = cards[i].card_id;
+			}
+		}
+		sendMessageCards(card_ids);
+	}
+
+	function init() {
+		var container = new createjs.Container();
+		stage.addChild(container);		
+				
+		var fields_x = [], fields_y = [];
+		var fields_width = [], fields_height = [], fields_color = [];
+		for (var j = 0; j < n_fields; j++) {
+			fields_x[j] = 120 * (j % 5 + 1);
+			fields_y[j] = j < 5 ? 100 : j < 10 ? 250 : j < 15 ? 450 : 600;
+			fields_width[j] = 120;
+			fields_height[j] = 150;
+			fields_color[j] = "#00FF00";
+		}
+		fields = [];
+		
+		for (var j = 0; j < fields_x.length; j++) {
+			
+			var field1 = new createjs.Shape();
+			field1.graphics.beginFill(fields_color[j]).drawRect(0, 0, fields_width[j], fields_height[j]);
+			field1.setBounds(0, 0, fields_width[j], fields_height[j]);
+			field1.x = fields_x[j];
+			field1.y = fields_y[j];
+			field1.x_center = field1.x + fields_width[j] / 2;
+			field1.y_center = field1.y + fields_height[j] / 2;
+			field1.counter = 0;
+			field1.id = j;
+			fields[j] = field1;
+			
+			field1.type = 'b';
+			field1.num = j;
+			
+			container.addChild(field1);
+		
+			//var label1 = new createjs.Text("0", "bold 20px Arial");
+			//label1.textAlign = "center";
+			//label1.x = fields_x[j];
+			//label1.y = fields_y[j];
+			//fields[j].label = label1;
+			//container.addChild(label1);
+			
+			update_field_label(field1);
+		}
+
+		cards = [];
+		var k = 0;
+		var cardimage = [];
+		//              M  D  H
+		card_values = [
+					   [5, 6, 0],
+					   [1, 1, 0],
+					   [7, 9, 0],
+					   [10, 15, 0],
+					   [2, 3, 0],
+					   [3, 4, 0],
+					   [2, 0, 3],
+					   [4, 0, 5],
+					   [4, 2, 2],
+					   [7, 4, 4]];
+		for (var i = 0; i < 30; i++){
+			k = i%10 + 1;
+			cardimage[i] = new Image();
+			cardimage[i].src = "/static/cards/card" + k + ".png";
+		}
+
+		for (var i = 0; i < 30; i++)
+			cards[i] = new createjs.Bitmap(cardimage[i]);
+
+		var cards_initial = {{ cards_initial }} ;
+
+		// create and populate the screen with random daisies:
+		for (var i = 0; i < 30; i++) {
+			console.log('creating card ' + i);
+			var card = cards[i];
+			container.addChild(card);
+			while (card.image.width == 0) console.log('waiting for card ' + i);
+			card.regX = card.image.width / 2 | 0;
+			card.regY = card.image.height / 2 | 0;
+			card.mana = card_values[i%10][0];
+			card.dmg = card_values[i%10][1];
+			card.heal = card_values[i%10][2];
+			card.scaleX = card.scaleY = card.scale = 5 / 13; // 1/5 .. 1
+			card.name = "card_" + i;
+			card.card_id = i;
+			card.cursor = "pointer";
+			if (cards_initial.indexOf(i) >= 0) {
+				card.field = fields[10 + i%10];
+			} else {
+				card.field = fields[i%10];
+			}
+			
+			move_card_to_its_field(card);
+			
+			card.on("mousedown", function (evt) {
+				this.parent.addChild(this);
+				this.offset = {x: this.x - evt.stageX, y: this.y - evt.stageY};
+			});
+
+			// the pressmove event is dispatched when the mouse moves after a mousedown on the target until the mouse is released.
+			card.on("pressmove", function (evt) {
+				var card = this;
+				console.log('pressmove for card from field ' + card.field.id)
+				if (card.field.type == 'b') {
+					card.x = evt.stageX + card.offset.x;
+					card.y = evt.stageY + card.offset.y;					
+					update_fields(card);
+					redraw_on_next_tick = true;
+				}
+				
+			});
+			
+			card.on("pressup", function (evt) {
+				var card = this;
+				return_card_to_its_field_b(card);
+				collectFieldA();
+				redraw_on_next_tick = true;
+			});
+			
+			
+		}
+		
+
+	//	var your_hp = new createjs.Text("0", "bold 20px Arial");
+	//	your_hp.textAlign = "center";
+	//	your_hp.text = 'YOUR HP  25';
+	//	your_hp.x = 100;
+	//	your_hp.y = 200;
+	//	container.addChild(your_hp);
+	}
+
+	function tick(event) {
+		if (! initialized) {
+			var is_ok = true;
+			for (var i = 0; i < 30; i++) {
+				var card = cards[i];
+				if (card.image.width == 0)
+					is_ok = false;
+			}
+			if (is_ok) {
+				init();
+				initialized = true;
+			} else {
+				return;
+			}
+		}
+		// this set makes it so the stage only re-renders when an event fieldler indicates a change has happened.
+		redraw_on_next_tick = true; // TODO (for TweenJS)
+		if (redraw_on_next_tick) {
+			redraw_on_next_tick = false; // only redraw_on_next_tick once
+			stage.update(event);
+		}
+	}
+	
+</script>
+
+<canvas style="" id="testCanvas" width="960" height="800"></canvas>
+
+{% endblock script_panel %}
